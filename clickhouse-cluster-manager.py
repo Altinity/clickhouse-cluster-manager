@@ -136,19 +136,64 @@ class SSHCopier:
         return files_copied
 
 
-class Manager:
-    options = None
+class CHConfigManager:
     config = None
 
-    def __init__(self):
-        self.options = self.parse_options()
+    def __init__(self, config):
+        self.config = config
 
-    def parse_options(self, config_folder='config'):
-        return {
-            'config-folder': config_folder,
-            'config.xml': config_folder + '/config.xml',
-            'user.xml': config_folder + '/user.xml'
-        }
+    @staticmethod
+    def is_element_comment(element):
+        return isinstance(element, lxml.etree._Comment)
+
+    def add_cluster(self, cluster_name):
+        def on_cluster_root(remote_servers_element):
+            new_cluster_element = etree.Element(cluster_name)
+            remote_servers_element.append(new_cluster_element)
+
+        return self.walk_config(on_cluster_root=on_cluster_root)
+
+    def add_shard(self, cluster_name):
+        def on_cluster(cluster_element):
+            if cluster_element.tag != cluster_name:
+                return
+            new_shard_element = etree.Element('shard')
+            cluster_element.append(new_shard_element)
+
+        return self.walk_config(on_cluster=on_cluster)
+
+    def add_replica(self, cluster_name, shard_index, host, port):
+        def on_shard(cluster_element, shard_element):
+            if cluster_element.tag != cluster_name:
+                return
+
+            if on_shard.shard_index == shard_index:
+                new_replica_element = etree.Element('replica')
+
+                new_host_element = etree.Element('host')
+                new_host_element.text = host
+                new_port_element = etree.Element('port')
+                new_port_element.text = port
+
+                new_replica_element.append(new_host_element)
+                new_replica_element.append(new_port_element)
+
+                shard_element.append(new_replica_element)
+
+            on_shard.shard_index += 1
+
+        on_shard.shard_index = 0
+
+        return self.walk_config(on_shard=on_shard)
+
+    def delete_cluster(self):
+        pass
+
+    def delete_shard(self):
+        pass
+
+    def delete_replica(self):
+        pass
 
     # lxml.etree._Element
     def on_cluster(self, cluster_element):
@@ -162,29 +207,10 @@ class Manager:
         port_element = replica_element.find('port')
         print("    replica: " + replica_element.tag + "|" + host_element.tag + ":" + host_element.text + ":" + port_element.tag + ":" + port_element.text + " path: " + cluster_element.tag + '/' + shard_element.tag + '/' + replica_element.tag)
 
-    def main(self):
-        self.open_config()
-        self.walk_config(
-            on_cluser=self.on_cluster,
-            on_shard=self.on_shard,
-            on_replica=self.on_replica
-        )
-        self.write_config()
-
-    def open_config(self):
-        f = open(self.options['config.xml'], 'rb')
-        self.config = f.read()
-        f.close()
-
-    def write_config(self):
-        f = open('test.xml', 'wb')
-        f.write(self.config)
-        f.close()
-
-
     def walk_config(
             self,
-            on_cluser = None,
+            on_cluster_root = None,
+            on_cluster = None,
             on_shard = None,
             on_replica = None
     ):
@@ -209,6 +235,9 @@ class Manager:
             # no <remote_servers> tag available
             return
 
+        if callable(on_cluster_root):
+            on_cluster_root(remote_servers_element)
+
         # iterate over <remote_servers> children elements
         # each tag inside it would be name of the cluster. ex: <my_perfect_cluster></my_perfect_cluster>
 
@@ -219,19 +248,19 @@ class Manager:
         for cluster_element in remote_servers_element:
 
             # skip comments
-            if ConfigManager.is_element_comment(cluster_element):
+            if self.is_element_comment(cluster_element):
                 continue
 
             # normal element - cluster name <my_cool_cluster>
 
-            if callable(on_cluser):
-                on_cluser(cluster_element)
+            if callable(on_cluster):
+                on_cluster(cluster_element)
 
             # walk over shards inside cluster
             for shard_element in cluster_element:
 
                 # skip comments
-                if ConfigManager.is_element_comment(shard_element):
+                if self.is_element_comment(shard_element):
                     continue
                 # skip everything what is not <shard> tag
                 if shard_element.tag != 'shard':
@@ -245,7 +274,7 @@ class Manager:
                 for replica_element in shard_element:
 
                     # skip comments
-                    if ConfigManager.is_element_comment(replica_element):
+                    if self.is_element_comment(replica_element):
                         continue
                     # skip everything what is not <replica> tag
                     if replica_element.tag != 'replica':
@@ -267,35 +296,53 @@ class Manager:
         #         shard_element.append(new_replica_element)
         #
         self.config = etree.tostring(config_tree, pretty_print=True)
+        return self.config
 
-class ConfigManager:
+    def demo(self):
+        self.walk_config(
+            on_cluster=self.on_cluster,
+            on_shard=self.on_shard,
+            on_replica=self.on_replica
+        )
 
-    @staticmethod
-    def is_element_comment(element):
-        return isinstance(element, lxml.etree._Comment)
 
-    def add_cluster(self):
-        pass
+class CHManager:
+    options = None
+    config = None
 
-    def add_shard(self):
-        pass
+    def __init__(self):
+        self.options = self.parse_options()
 
-    def add_replica(self):
-        pass
+    def parse_options(self, config_folder='config'):
+        return {
+            'config-folder': config_folder,
+            'config.xml': config_folder + '/config.xml',
+            'user.xml': config_folder + '/user.xml'
+        }
 
-    def delete_cluster(self):
-        pass
+    def open_config(self):
+        f = open(self.options['config.xml'], 'rb')
+        self.config = f.read()
+        f.close()
 
-    def delete_shard(self):
-        pass
+    def write_config(self):
+        f = open('test.xml', 'wb')
+        f.write(self.config)
+        f.close()
 
-    def delete_replica(self):
-        pass
-
+    def main(self):
+        self.open_config()
+        cmanager = CHConfigManager(self.config)
+#        cmanager.demo()
+        self.config = cmanager.add_cluster('new_cluster')
+        self.config = cmanager.add_shard('new_cluster')
+        self.config = cmanager.add_shard('new_cluster')
+        self.config = cmanager.add_replica('new_cluster', 1, 'new_host', 'new_port')
+        self.write_config()
 
 if __name__ == '__main__':
     print("RUN")
-    manager = Manager();
+    manager = CHManager();
     manager.main()
 
 #    copier = SSHCopier(
