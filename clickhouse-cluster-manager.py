@@ -138,6 +138,7 @@ class SSHCopier:
 
 class Manager:
     options = None
+    config = None
 
     def __init__(self):
         self.options = self.parse_options()
@@ -149,30 +150,55 @@ class Manager:
             'user.xml': config_folder + '/user.xml'
         }
 
+    # lxml.etree._Element
+    def on_cluster(self, cluster_element):
+        print("cluster: " + cluster_element.tag)
+
+    def on_shard(self, cluster_element, shard_element):
+        print("  shard: " + shard_element.tag + " path: " + cluster_element.tag + '/' + shard_element.tag)
+
+    def on_replica(self, cluster_element, shard_element, replica_element):
+        host_element = replica_element.find('host')
+        port_element = replica_element.find('port')
+        print("    replica: " + replica_element.tag + "|" + host_element.tag + ":" + host_element.text + ":" + port_element.tag + ":" + port_element.text + " path: " + cluster_element.tag + '/' + shard_element.tag + '/' + replica_element.tag)
+
     def main(self):
-        print("Running main")
+        self.open_config()
+        self.walk_config(
+            on_cluser=self.on_cluster,
+            on_shard=self.on_shard,
+            on_replica=self.on_replica
+        )
+        self.write_config()
 
-        # tree = etree.parse('books.xml')
-        # root = tree.getroot()
-        #
-        # print(etree.tostring(root, pretty_print=True).decode("utf-8"))
-        # root.append(new_entry)
-        # print(etree.tostring(root, pretty_print=True).decode("utf-8"))
-        #
-        # f = open('books-mod.xml', 'w')
-        # f.write(etree.tostring(root, pretty_print=True).decode("utf-8"))
-        # f.close()
+    def open_config(self):
+        f = open(self.options['config.xml'], 'rb')
+        self.config = f.read()
+        f.close()
 
-        print(self.options)
+    def write_config(self):
+        f = open('test.xml', 'wb')
+        f.write(self.config)
+        f.close()
 
+
+    def walk_config(
+            self,
+            on_cluser = None,
+            on_shard = None,
+            on_replica = None
+    ):
         try:
-            config_tree = etree.parse(self.options['config.xml'])
+            # ElementTree object
+            config_tree = etree.fromstring(self.config)
         except IOError:
             # file is not readable
             print("IOError")
+            return
         except etree.XMLSyntaxError:
             # file is readable, but has does not contain well-formed XML
             print("SyntaxError")
+            return
 
 
         # config_root = config_tree.getroot()
@@ -183,33 +209,27 @@ class Manager:
             # no <remote_servers> tag available
             return
 
-        print("See remote_servers of type: " + str(type(remote_servers_element)))
-
         # iterate over <remote_servers> children elements
-        # each tag inside it would be name of the cluster
+        # each tag inside it would be name of the cluster. ex: <my_perfect_cluster></my_perfect_cluster>
 
-        if len(remote_servers_element) > 0:
-            print("See the following clusters:")
-        else:
+        if not len(remote_servers_element):
             print("No clusters defined")
 
-        # walk over cluster's specifications
+        # walk over clusters inside 'remote servers'
         for cluster_element in remote_servers_element:
+
             # skip comments
             if ConfigManager.is_element_comment(cluster_element):
                 continue
 
-            print("See cluster of type: " + str(type(cluster_element)))
-
             # normal element - cluster name <my_cool_cluster>
-            print(cluster_element.tag)
 
-            if len(cluster_element) > 0:
-                print("See the following shards:")
-            else:
-                print("No shards defined")
+            if callable(on_cluser):
+                on_cluser(cluster_element)
 
+            # walk over shards inside cluster
             for shard_element in cluster_element:
+
                 # skip comments
                 if ConfigManager.is_element_comment(shard_element):
                     continue
@@ -217,53 +237,36 @@ class Manager:
                 if shard_element.tag != 'shard':
                     continue
 
-                print("See cluster of type: " + str(type(shard_element)))
-
                 # normal element - <shard>
-                print(shard_element.tag)
+                if callable(on_shard):
+                    on_shard(cluster_element, shard_element)
 
-                if len(shard_element) > 0:
-                    print("See the following replicas:")
-                else:
-                    print("No replicas defined")
-
+                # walk over replicas inside shard
                 for replica_element in shard_element:
+
                     # skip comments
                     if ConfigManager.is_element_comment(replica_element):
                         continue
-
                     # skip everything what is not <replica> tag
                     if replica_element.tag != 'replica':
                         continue
 
-                    print("See replica of type: " + str(type(replica_element)))
-
                     # normal element - <replica>
-                    print(replica_element.tag)
+                    if callable(on_replica):
+                        on_replica(cluster_element, shard_element, replica_element)
 
-                    host_element = replica_element.find('host')
-                    port_element = replica_element.find('port')
-
-                    print(host_element.tag)
-                    print(host_element.text)
-                    print(port_element.tag)
-                    print(port_element.text)
-
-                new_host_element = etree.Element('host')
-                new_host_element.text = 'super-duper-host'
-                new_port_element = etree.Element('port')
-                new_port_element.text = '9001'
-
-                new_replica_element = etree.Element('replica')
-                new_replica_element.append(new_host_element)
-                new_replica_element.append(new_port_element)
-
-                shard_element.append(new_replica_element)
-
-        f = open('test.xml', 'w')
-        f.write(etree.tostring(config_tree, pretty_print=True).decode("utf-8"))
-        f.close()
-
+        #         new_host_element = etree.Element('host')
+        #         new_host_element.text = 'super-duper-host'
+        #         new_port_element = etree.Element('port')
+        #         new_port_element.text = '9001'
+        #
+        #         new_replica_element = etree.Element('replica')
+        #         new_replica_element.append(new_host_element)
+        #         new_replica_element.append(new_port_element)
+        #
+        #         shard_element.append(new_replica_element)
+        #
+        self.config = etree.tostring(config_tree, pretty_print=True)
 
 class ConfigManager:
 
@@ -271,11 +274,29 @@ class ConfigManager:
     def is_element_comment(element):
         return isinstance(element, lxml.etree._Comment)
 
+    def add_cluster(self):
+        pass
+
+    def add_shard(self):
+        pass
+
+    def add_replica(self):
+        pass
+
+    def delete_cluster(self):
+        pass
+
+    def delete_shard(self):
+        pass
+
+    def delete_replica(self):
+        pass
+
 
 if __name__ == '__main__':
     print("RUN")
-    #manager = Manager();
-    #manager.main()
+    manager = Manager();
+    manager.main()
 
 #    copier = SSHCopier(
 #        hostname='192.168.74.157',
