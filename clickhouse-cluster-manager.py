@@ -377,12 +377,111 @@ class CHManager:
 
         self.write_config()
 
-if __name__ == '__main__':
-    print("RUN")
-    manager = CHManager();
-    manager.main()
 
-#    copier = SSHCopier(
+
+def parse_element(line):
+    # /cluster/0/host:port
+
+    line = line.strip()
+
+    if not line.startswith('/'):
+        line = '/' + line
+
+    try:
+        parts = line.split('/')
+    except:
+        parts = []
+
+    try:
+        cluster = parts[1]
+    except IndexError:
+        cluster = None
+
+    try:
+        shard_index = int(parts[2])
+    except IndexError:
+        shard_index = None
+
+    try:
+        host_port = parts[3]
+        host_port = host_port.split(':')
+        host = host_port[0]
+        port = host_port[1]
+    except IndexError:
+        host = None
+        port = None
+
+    return {
+        'cluster': cluster,
+        'shard_index': shard_index,
+        'host': host,
+        'port': port
+    }
+
+
+def get_interactive_choice():
+    print()
+    print("[1] Add cluster")
+    print("[2] Add shard")
+    print("[3] Add replica")
+    print()
+    print("[a] Delete cluster")
+    print("[s] Delete shard")
+    print("[d] Delete replica")
+    print()
+    print("[p] Print cluster layout")
+    print()
+    print("[q] Quit.")
+
+    return input("What would you like to do? ")
+
+
+def interactive():
+    choice = ''
+    while choice != 'q':
+
+        choice = get_interactive_choice()
+
+        if choice == '1':
+            print("Add cluster")
+            print(parse_element(input("Cluster name to add:")))
+
+        elif choice == '2':
+            print("Add shard")
+            print(parse_element(input("Cluster name to add shard:")))
+
+        elif choice == '3':
+            print("Add replica")
+            print(parse_element(input("Cluster path for replica:")))
+
+        elif choice == 'a':
+            print("Delete cluster")
+            print(parse_element(input("Cluster name to delete:")))
+
+        elif choice == 's':
+            print("Delete shard")
+            print(parse_element(input("Cluster path for shard:")))
+
+        elif choice == 'd':
+            print("Delete replica")
+            print(parse_element(input("Cluster path for replica:")))
+
+        elif choice == 'p':
+            print("Print cluster layout")
+
+        elif choice == 'q':
+            print("Thanks for playing. Bye.")
+
+        else:
+            print("I didn't understand that choice.")
+
+if __name__ == '__main__':
+    # print("RUN")
+    # manager = CHManager();
+    # manager.main()
+    interactive()
+
+        #    copier = SSHCopier(
 #        hostname='192.168.74.157',
 #        password='wax2bee692',
 #        dir_remote='/home/user/',
