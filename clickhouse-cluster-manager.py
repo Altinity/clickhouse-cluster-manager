@@ -237,7 +237,7 @@ class CHConfigManager:
     ):
         try:
             # ElementTree object
-            config_tree = etree.fromstring(self.config)
+            config_tree = etree.fromstring(self.config, etree.XMLParser(remove_blank_text=True, encoding="utf-8"))
         except IOError:
             # file is not readable
             print("IOError")
@@ -342,6 +342,7 @@ class CHConfigManager:
 class CHManager:
     options = None
     config = None
+    ch_config_manager = None
 
     def __init__(self):
         self.options = self.parse_options()
@@ -363,123 +364,130 @@ class CHManager:
         f.write(self.config)
         f.close()
 
+    @staticmethod
+    def parse_element(line):
+        # /cluster/0/host:port
+
+        line = line.strip()
+
+        if not line.startswith('/'):
+            line = '/' + line
+
+        try:
+            parts = line.split('/')
+        except:
+            parts = []
+
+        try:
+            cluster = parts[1]
+        except IndexError:
+            cluster = None
+
+        try:
+            shard_index = int(parts[2])
+        except IndexError:
+            shard_index = None
+
+        try:
+            host_port = parts[3]
+            host_port = host_port.split(':')
+            host = host_port[0]
+            port = host_port[1]
+        except IndexError:
+            host = None
+            port = None
+
+        return {
+            'cluster': cluster,
+            'shard_index': shard_index,
+            'host': host,
+            'port': port
+        }
+
+    @staticmethod
+    def get_interactive_choice():
+        print()
+        print("[1] Add cluster")
+        print("[2] Add shard")
+        print("[3] Add replica")
+        print()
+        print("[a] Delete cluster")
+        print("[s] Delete shard")
+        print("[d] Delete replica")
+        print()
+        print("[p] Print cluster layout")
+        print("[w] Write cluster layout")
+        print()
+        print("[q] Quit.")
+
+        return input("What would you like to do? ")
+
+    def interactive(self):
+        choice = ''
+        while choice != 'q':
+
+            choice = self.get_interactive_choice()
+
+            if choice == '1':
+                print("Add cluster")
+                c = self.parse_element(input("Cluster name to add:"))
+                print(c)
+                self.config = self.ch_config_manager.add_cluster(c['cluster'])
+
+            elif choice == '2':
+                print("Add shard")
+                c = self.parse_element(input("Cluster name to add shard:"))
+                print(c)
+                self.config = self.ch_config_manager.add_shard(c['cluster'])
+
+            elif choice == '3':
+                print("Add replica")
+                c = self.parse_element(input("Cluster path for replica:"))
+                print(c)
+                self.config = self.ch_config_manager.add_replica(c['cluster'], c['shard_index'], c['host'], c['port'])
+
+            elif choice == 'a':
+                print("Delete cluster")
+                c = self.parse_element(input("Cluster name to delete:"))
+                print(c)
+                self.config = self.ch_config_manager.delete_cluster(c['cluster'])
+
+            elif choice == 's':
+                print("Delete shard")
+                c = self.parse_element(input("Cluster path for shard:"))
+                print(c)
+                self.config = self.ch_config_manager.delete_shard(c['cluster'], c['shard_index'])
+
+            elif choice == 'd':
+                print("Delete replica")
+                c = self.parse_element(input("Cluster path for replica:"))
+                print(c)
+                self.config = self.ch_config_manager.delete_replica(c['cluster'], c['shard_index'], c['host'], c['port'])
+
+            elif choice == 'p':
+                print("Print cluster layout")
+                print(self.config.decode())
+
+            elif choice == 'w':
+                print("Write cluster layout to disk")
+                self.write_config()
+
+            elif choice == 'q':
+                print("Thanks for playing. Bye.")
+
+            else:
+                print("I didn't understand that choice.")
+
     def main(self):
         self.open_config()
-        cmanager = CHConfigManager(self.config)
-#        cmanager.demo()
-        self.config = cmanager.add_cluster('new_cluster')
-        self.config = cmanager.add_shard('new_cluster')
-        self.config = cmanager.add_shard('new_cluster')
-        self.config = cmanager.add_replica('new_cluster', 1, 'new_host', 'new_port')
-        self.config = cmanager.delete_replica('new_cluster', 1, 'new_host', 'new_port')
-        self.config = cmanager.delete_shard('new_cluster', 1)
-        self.config = cmanager.delete_cluster('new_cluster')
+        self.ch_config_manager = CHConfigManager(self.config)
+        self.interactive()
 
-        self.write_config()
-
-
-
-def parse_element(line):
-    # /cluster/0/host:port
-
-    line = line.strip()
-
-    if not line.startswith('/'):
-        line = '/' + line
-
-    try:
-        parts = line.split('/')
-    except:
-        parts = []
-
-    try:
-        cluster = parts[1]
-    except IndexError:
-        cluster = None
-
-    try:
-        shard_index = int(parts[2])
-    except IndexError:
-        shard_index = None
-
-    try:
-        host_port = parts[3]
-        host_port = host_port.split(':')
-        host = host_port[0]
-        port = host_port[1]
-    except IndexError:
-        host = None
-        port = None
-
-    return {
-        'cluster': cluster,
-        'shard_index': shard_index,
-        'host': host,
-        'port': port
-    }
-
-
-def get_interactive_choice():
-    print()
-    print("[1] Add cluster")
-    print("[2] Add shard")
-    print("[3] Add replica")
-    print()
-    print("[a] Delete cluster")
-    print("[s] Delete shard")
-    print("[d] Delete replica")
-    print()
-    print("[p] Print cluster layout")
-    print()
-    print("[q] Quit.")
-
-    return input("What would you like to do? ")
-
-
-def interactive():
-    choice = ''
-    while choice != 'q':
-
-        choice = get_interactive_choice()
-
-        if choice == '1':
-            print("Add cluster")
-            print(parse_element(input("Cluster name to add:")))
-
-        elif choice == '2':
-            print("Add shard")
-            print(parse_element(input("Cluster name to add shard:")))
-
-        elif choice == '3':
-            print("Add replica")
-            print(parse_element(input("Cluster path for replica:")))
-
-        elif choice == 'a':
-            print("Delete cluster")
-            print(parse_element(input("Cluster name to delete:")))
-
-        elif choice == 's':
-            print("Delete shard")
-            print(parse_element(input("Cluster path for shard:")))
-
-        elif choice == 'd':
-            print("Delete replica")
-            print(parse_element(input("Cluster path for replica:")))
-
-        elif choice == 'p':
-            print("Print cluster layout")
-
-        elif choice == 'q':
-            print("Thanks for playing. Bye.")
-
-        else:
-            print("I didn't understand that choice.")
 
 if __name__ == '__main__':
     # print("RUN")
-    # manager = CHManager();
-    # manager.main()
-    interactive()
+    manager = CHManager();
+    manager.main()
 
         #    copier = SSHCopier(
 #        hostname='192.168.74.157',
