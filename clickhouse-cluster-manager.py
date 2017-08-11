@@ -154,7 +154,7 @@ class CHConfigManager:
         return self.walk_config(on_cluster_root=on_cluster_root)
 
     def add_shard(self, cluster_name):
-        def on_cluster(cluster_element):
+        def on_cluster(cluster_element, cluster_element_index):
             if cluster_element.tag != cluster_name:
                 return
             new_shard_element = etree.Element('shard')
@@ -163,49 +163,70 @@ class CHConfigManager:
         return self.walk_config(on_cluster=on_cluster)
 
     def add_replica(self, cluster_name, shard_index, host, port):
-        def on_shard(cluster_element, shard_element):
+        def on_shard(cluster_element, cluster_element_index, shard_element, shard_element_index):
             if cluster_element.tag != cluster_name:
                 return
 
-            if on_shard.shard_index == shard_index:
-                new_replica_element = etree.Element('replica')
+            if shard_element_index != shard_index:
+                return
 
-                new_host_element = etree.Element('host')
-                new_host_element.text = host
-                new_port_element = etree.Element('port')
-                new_port_element.text = port
+            new_replica_element = etree.Element('replica')
 
-                new_replica_element.append(new_host_element)
-                new_replica_element.append(new_port_element)
+            new_host_element = etree.Element('host')
+            new_host_element.text = host
+            new_port_element = etree.Element('port')
+            new_port_element.text = port
 
-                shard_element.append(new_replica_element)
+            new_replica_element.append(new_host_element)
+            new_replica_element.append(new_port_element)
 
-            on_shard.shard_index += 1
-
-        on_shard.shard_index = 0
+            shard_element.append(new_replica_element)
 
         return self.walk_config(on_shard=on_shard)
 
-    def delete_cluster(self):
-        pass
+    def delete_cluster(self, cluster_name):
+        def on_cluster(cluster_element, cluster_element_index):
+            if cluster_element.tag != cluster_name:
+                return
+            cluster_element.getparent().remove(cluster_element)
 
-    def delete_shard(self):
-        pass
+        return self.walk_config(on_cluster=on_cluster)
 
-    def delete_replica(self):
-        pass
+    def delete_shard(self, cluster_name, shard_index):
+        def on_shard(cluster_element, cluster_element_index, shard_element, shard_element_index):
+            if cluster_element.tag != cluster_name:
+                return
+
+            if shard_element_index != shard_index:
+                return
+
+            cluster_element.remove(shard_element)
+
+        return self.walk_config(on_shard=on_shard)
+
+    def delete_replica(self, cluster_name, shard_index, host, port):
+        def on_replica(cluster_element, cluster_element_index, shard_element, shard_element_index, replica_element, replica_element_index):
+            if cluster_element.tag != cluster_name:
+                return
+
+            if shard_element_index != shard_index:
+                return
+
+            shard_element.remove(replica_element)
+
+        return self.walk_config(on_replica=on_replica)
 
     # lxml.etree._Element
-    def on_cluster(self, cluster_element):
-        print("cluster: " + cluster_element.tag)
-
-    def on_shard(self, cluster_element, shard_element):
-        print("  shard: " + shard_element.tag + " path: " + cluster_element.tag + '/' + shard_element.tag)
-
-    def on_replica(self, cluster_element, shard_element, replica_element):
-        host_element = replica_element.find('host')
-        port_element = replica_element.find('port')
-        print("    replica: " + replica_element.tag + "|" + host_element.tag + ":" + host_element.text + ":" + port_element.tag + ":" + port_element.text + " path: " + cluster_element.tag + '/' + shard_element.tag + '/' + replica_element.tag)
+    # def on_cluster(self, cluster_element):
+    #     print("cluster: " + cluster_element.tag)
+    #
+    # def on_shard(self, cluster_element, shard_element):
+    #     print("  shard: " + shard_element.tag + " path: " + cluster_element.tag + '/' + shard_element.tag)
+    #
+    # def on_replica(self, cluster_element, shard_element, replica_element):
+    #     host_element = replica_element.find('host')
+    #     port_element = replica_element.find('port')
+    #     print("    replica: " + replica_element.tag + "|" + host_element.tag + ":" + host_element.text + ":" + port_element.tag + ":" + port_element.text + " path: " + cluster_element.tag + '/' + shard_element.tag + '/' + replica_element.tag)
 
     def walk_config(
             self,
@@ -244,6 +265,8 @@ class CHConfigManager:
         if not len(remote_servers_element):
             print("No clusters defined")
 
+        cluster_element_index = 0
+
         # walk over clusters inside 'remote servers'
         for cluster_element in remote_servers_element:
 
@@ -254,7 +277,9 @@ class CHConfigManager:
             # normal element - cluster name <my_cool_cluster>
 
             if callable(on_cluster):
-                on_cluster(cluster_element)
+                on_cluster(cluster_element, cluster_element_index)
+
+            shard_element_index = 0
 
             # walk over shards inside cluster
             for shard_element in cluster_element:
@@ -268,7 +293,9 @@ class CHConfigManager:
 
                 # normal element - <shard>
                 if callable(on_shard):
-                    on_shard(cluster_element, shard_element)
+                    on_shard(cluster_element, cluster_element_index, shard_element, shard_element_index)
+
+                replica_element_index = 0
 
                 # walk over replicas inside shard
                 for replica_element in shard_element:
@@ -282,7 +309,13 @@ class CHConfigManager:
 
                     # normal element - <replica>
                     if callable(on_replica):
-                        on_replica(cluster_element, shard_element, replica_element)
+                        on_replica(cluster_element, cluster_element_index, shard_element, shard_element_index, replica_element, replica_element_index)
+
+                    replica_element_index += 1
+
+                shard_element_index += 1
+
+            cluster_element_index += 1
 
         #         new_host_element = etree.Element('host')
         #         new_host_element.text = 'super-duper-host'
@@ -338,6 +371,10 @@ class CHManager:
         self.config = cmanager.add_shard('new_cluster')
         self.config = cmanager.add_shard('new_cluster')
         self.config = cmanager.add_replica('new_cluster', 1, 'new_host', 'new_port')
+        self.config = cmanager.delete_replica('new_cluster', 1, 'new_host', 'new_port')
+        self.config = cmanager.delete_shard('new_cluster', 1)
+        self.config = cmanager.delete_cluster('new_cluster')
+
         self.write_config()
 
 if __name__ == '__main__':
