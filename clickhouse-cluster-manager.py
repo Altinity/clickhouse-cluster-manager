@@ -5,6 +5,8 @@ from lxml import etree
 import os
 import paramiko
 
+import argparse
+
 class SSHCopier:
     # remote SSH server hostname
     hostname = None
@@ -348,10 +350,20 @@ class CHManager:
         self.options = self.parse_options()
 
     def parse_options(self, config_folder='config'):
+        argparser = argparse.ArgumentParser(
+            description='ClickHouse configuration manager',
+            epilog='==============='
+        )
+        argparser.add_argument('--interactive', action='store_true', help='Interactive mode')
+        argparser.add_argument('--config-folder', type=str, default='/etc/clickhouse-server/config/', help='Path to CH server config folder. Default value=/etc/clickhouse-server/')
+        argparser.add_argument('--config.xml', type=str, default='config.xml', help='CH server config file. Default value=config.xml')
+        argparser.add_argument('--user.xml', type=str, default='user.xml', help='CH server user file. Default value=user.xml')
+        args = argparser.parse_args()
         return {
-            'config-folder': config_folder,
-            'config.xml': config_folder + '/config.xml',
-            'user.xml': config_folder + '/user.xml'
+            'interactive': args.interactive,
+            'config-folder': args.config_folder,
+            'config.xml': args.config_folder + '/' + getattr(args, 'config.xml'),
+            'user.xml': args.config_folder + '/' + getattr(args, 'user.xml')
         }
 
     def open_config(self):
@@ -481,7 +493,10 @@ class CHManager:
     def main(self):
         self.open_config()
         self.ch_config_manager = CHConfigManager(self.config)
-        self.interactive()
+        if self.options['interactive']:
+            self.interactive()
+        else:
+            print("Command mode not implemented yet")
 
 
 if __name__ == '__main__':
