@@ -218,6 +218,24 @@ class CHConfigManager:
 
         return self.walk_config(on_replica=on_replica)
 
+    def print(self):
+        def on_cluster(cluster_element, cluster_element_index):
+            print()
+            print(cluster_element.tag)
+            pass
+
+        def on_shard(cluster_element, cluster_element_index, shard_element, shard_element_index):
+            print('  ' + shard_element.tag + '[' + str(shard_element_index) + ']')
+            pass
+
+        def on_replica(cluster_element, cluster_element_index, shard_element, shard_element_index, replica_element, replica_element_index):
+            host_element = replica_element.find('host')
+            port_element = replica_element.find('port')
+            print("    " + replica_element.tag + '[' + str(replica_element_index) + "]|" + host_element.tag + ":" + host_element.text + ":" + port_element.tag + ":" + port_element.text + " path: " + cluster_element.tag + '/' + shard_element.tag + '[' + str(shard_element_index) + ']/' + replica_element.tag)
+            pass
+
+        return self.walk_config(on_cluster=on_cluster, on_shard=on_shard, on_replica=on_replica)
+
     # lxml.etree._Element
     # def on_cluster(self, cluster_element):
     #     print("cluster: " + cluster_element.tag)
@@ -429,6 +447,7 @@ class CHManager:
         print()
         print("[p] Print cluster layout")
         print("[w] Write cluster layout")
+        print("[u] pUsh cluster config")
         print()
         print("[q] Quit.")
 
@@ -478,11 +497,14 @@ class CHManager:
 
             elif choice == 'p':
                 print("Print cluster layout")
-                print(self.config.decode())
+                self.ch_config_manager.print()
 
             elif choice == 'w':
                 print("Write cluster layout to disk")
                 self.write_config()
+
+            elif choice == 'u':
+                print("pUsh config everywhere")
 
             elif choice == 'q':
                 print("Thanks for playing. Bye.")
