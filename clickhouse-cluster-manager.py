@@ -37,7 +37,8 @@ class SSHCopier:
             password='password',
             rsa_private_key_filename='~/.ssh/rsa_private_key',
             dir_remote='/home/to',
-            files_to_copy=[]
+            files_to_copy=[],
+            dry=False
     ):
         self.hostname = hostname
         self.port = port
@@ -46,6 +47,7 @@ class SSHCopier:
         self.rsa_private_key_filename = rsa_private_key_filename
         self.dir_remote = dir_remote
         self.files_to_copy = files_to_copy
+        self.dry = dry
 
     def copy_files_list(self):
         """
@@ -58,6 +60,18 @@ class SSHCopier:
         hostkeytype = None
         hostkey = None
         files_copied = 0
+
+        if self.dry:
+            for file in self.files_to_copy:
+                print("DRY: copy {} to {}:{}/{} as {}:{}".format(
+                    file,
+                    self.hostname,
+                    self.port,
+                    self.dir_remote,
+                    self.username,
+                    '***'
+                ))
+            return
 
         # build dictionary of known hosts
         try:
@@ -217,6 +231,50 @@ class CHConfigManager:
             shard_element.remove(replica_element)
 
         return self.walk_config(on_replica=on_replica)
+
+    def print(self):
+        def on_cluster(cluster_element, cluster_element_index):
+            print()
+            print(cluster_element.tag)
+            pass
+
+        def on_shard(cluster_element, cluster_element_index, shard_element, shard_element_index):
+            print('  ' + shard_element.tag + '[' + str(shard_element_index) + ']')
+            pass
+
+        def on_replica(cluster_element, cluster_element_index, shard_element, shard_element_index, replica_element, replica_element_index):
+            host_element = replica_element.find('host')
+            port_element = replica_element.find('port')
+            print("    " + replica_element.tag + '[' + str(replica_element_index) + "]|" + host_element.tag + ":" + host_element.text + ":" + port_element.tag + ":" + port_element.text + " path: " + cluster_element.tag + '/' + shard_element.tag + '[' + str(shard_element_index) + ']/' + replica_element.tag)
+            pass
+
+        return self.walk_config(on_cluster=on_cluster, on_shard=on_shard, on_replica=on_replica)
+
+    def push(self):
+        def on_replica(cluster_element, cluster_element_index, shard_element, shard_element_index, replica_element, replica_element_index):
+            host_element = replica_element.find('host')
+            port_element = replica_element.find('port')
+            print("    " + replica_element.tag + '[' + str(replica_element_index) + "]|" + host_element.tag + ":" + host_element.text + ":" + port_element.tag + ":" + port_element.text + " path: " + cluster_element.tag + '/' + shard_element.tag + '[' + str(shard_element_index) + ']/' + replica_element.tag)
+            host = host_element.text
+            port = port_element.text
+            on_replica.hosts.append({'host': host, 'port':port})
+
+            pass
+        on_replica.hosts = []
+        self.walk_config(on_replica=on_replica)
+
+        for replica in on_replica.hosts:
+            host = replica['host']
+            print("Pushing to:" + host)
+            copier = SSHCopier(
+                hostname=host,
+                username='uname',
+                password='pwd',
+                dir_remote='/etc/some/where/there',
+                files_to_copy=['config.file.xml'],
+                dry=True
+            )
+            copier.copy_files_list()
 
     # lxml.etree._Element
     # def on_cluster(self, cluster_element):
@@ -429,6 +487,7 @@ class CHManager:
         print()
         print("[p] Print cluster layout")
         print("[w] Write cluster layout")
+        print("[u] pUsh cluster config")
         print()
         print("[q] Quit.")
 
@@ -478,11 +537,15 @@ class CHManager:
 
             elif choice == 'p':
                 print("Print cluster layout")
-                print(self.config.decode())
+                self.ch_config_manager.print()
 
             elif choice == 'w':
                 print("Write cluster layout to disk")
                 self.write_config()
+
+            elif choice == 'u':
+                self.ch_config_manager.push()
+                print("pUsh config everywhere")
 
             elif choice == 'q':
                 print("Thanks for playing. Bye.")
