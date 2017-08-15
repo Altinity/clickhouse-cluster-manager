@@ -1,3 +1,4 @@
+# https://gist.github.com/sloria/7001839
 
 import lxml
 from lxml import etree
@@ -7,7 +8,20 @@ import paramiko
 
 import argparse
 
+
 class SSHCopier:
+    """Copy files via SSH
+
+    :param hostname='127.0.0.1',
+    :param port=22,
+    :param username='user',
+    :param password='password',
+    :param rsa_private_key_filename='~/.ssh/rsa_private_key',
+    :param dir_remote='/home/to',
+    :param files_to_copy=[],
+    :param dry=False
+    """
+
     # remote SSH server hostname
     hostname = None
 
@@ -50,10 +64,12 @@ class SSHCopier:
         self.dry = dry
 
     def copy_files_list(self):
-        """
-        Tries first to connect using a private key from a private key file
-        or provided by an SSH agent. If RSA authentication fails, then
-        password login is attempted.
+        """Copy list of files
+
+        At first try to connect using a private key either from a private key file
+        or provided by an SSH agent.
+        If RSA authentication fails, then make second attempt
+        with password login.
         """
 
         # get host key, if we know one
@@ -62,6 +78,7 @@ class SSHCopier:
         files_copied = 0
 
         if self.dry:
+            # just print what we'd like to do in here
             for file in self.files_to_copy:
                 print("DRY: copy {} to {}:{}/{} as {}:{}".format(
                     file,
@@ -71,6 +88,7 @@ class SSHCopier:
                     self.username,
                     '***'
                 ))
+            # no actual actions are expected - nothing to do in here
             return
 
         # build dictionary of known hosts
@@ -81,7 +99,7 @@ class SSHCopier:
             host_keys = {}
 
         if self.hostname in host_keys:
-            # known host
+            # already known host
             hostkeytype = host_keys[self.hostname].keys()[0]
             hostkey = host_keys[self.hostname][hostkeytype]
             print('Using host key of type' + hostkeytype)
@@ -93,7 +111,7 @@ class SSHCopier:
             transport.start_client()
         except:
             # unable to connect at all
-            return 0
+            return
 
         # key auth
         # try to authenticate with any of:
@@ -153,6 +171,12 @@ class SSHCopier:
 
 
 class CHConfigManager:
+    """ClickHouse configuration manager
+
+    :param config string configuration content
+    """
+
+    # string - XML configuration content
     config = None
 
     def __init__(self, config):
@@ -160,16 +184,35 @@ class CHConfigManager:
 
     @staticmethod
     def is_element_comment(element):
+        """Check whether specified element is an XML comment
+
+        :param element: Element to check
+        :return: bool
+        """
         return isinstance(element, lxml.etree._Comment)
 
     def add_cluster(self, cluster_name):
+        """Add new cluster to config
+        :param cluster_name:
+        :return:
+        """
         def on_cluster_root(remote_servers_element):
+            """
+            Add new cluster to the root of cluster specification
+            :param remote_servers_element:
+            :return:
+            """
             new_cluster_element = etree.Element(cluster_name)
             remote_servers_element.append(new_cluster_element)
 
         return self.walk_config(on_cluster_root=on_cluster_root)
 
     def add_shard(self, cluster_name):
+        """
+        Add new shard into cluster named cluster_name
+        :param cluster_name:
+        :return:
+        """
         def on_cluster(cluster_element, cluster_element_index):
             if cluster_element.tag != cluster_name:
                 return
@@ -179,6 +222,15 @@ class CHConfigManager:
         return self.walk_config(on_cluster=on_cluster)
 
     def add_replica(self, cluster_name, shard_index, host, port):
+        """
+        Add new replica with host:port into cluster named cluster_name shard with index shard_index
+
+        :param cluster_name:
+        :param shard_index:
+        :param host:
+        :param port:
+        :return:
+        """
         def on_shard(cluster_element, cluster_element_index, shard_element, shard_element_index):
             if cluster_element.tag != cluster_name:
                 return
@@ -201,6 +253,12 @@ class CHConfigManager:
         return self.walk_config(on_shard=on_shard)
 
     def delete_cluster(self, cluster_name):
+        """
+        Delete cluster from cluster specification
+
+        :param cluster_name:
+        :return:
+        """
         def on_cluster(cluster_element, cluster_element_index):
             if cluster_element.tag != cluster_name:
                 return
@@ -209,6 +267,12 @@ class CHConfigManager:
         return self.walk_config(on_cluster=on_cluster)
 
     def delete_shard(self, cluster_name, shard_index):
+        """
+        Delete shard with specified index in specified cluster
+        :param cluster_name:
+        :param shard_index:
+        :return:
+        """
         def on_shard(cluster_element, cluster_element_index, shard_element, shard_element_index):
             if cluster_element.tag != cluster_name:
                 return
@@ -221,6 +285,14 @@ class CHConfigManager:
         return self.walk_config(on_shard=on_shard)
 
     def delete_replica(self, cluster_name, shard_index, host, port):
+        """
+        Delete replica having host:port inside shard with specified index in specified cluster
+        :param cluster_name:
+        :param shard_index:
+        :param host:
+        :param port:
+        :return:
+        """
         def on_replica(cluster_element, cluster_element_index, shard_element, shard_element_index, replica_element, replica_element_index):
             if cluster_element.tag != cluster_name:
                 return
@@ -233,6 +305,10 @@ class CHConfigManager:
         return self.walk_config(on_replica=on_replica)
 
     def print(self):
+        """
+        Print cluster specification
+        :return:
+        """
         def on_cluster(cluster_element, cluster_element_index):
             print()
             print(cluster_element.tag)
@@ -251,6 +327,10 @@ class CHConfigManager:
         return self.walk_config(on_cluster=on_cluster, on_shard=on_shard, on_replica=on_replica)
 
     def push(self):
+        """
+        Push configuration onto all replicas found in cluster specification
+        :return:
+        """
         def on_replica(cluster_element, cluster_element_index, shard_element, shard_element_index, replica_element, replica_element_index):
             host_element = replica_element.find('host')
             port_element = replica_element.find('port')
@@ -295,6 +375,15 @@ class CHConfigManager:
             on_shard = None,
             on_replica = None
     ):
+        """
+        Walk over cluster configuration calling callback functions on-the-way
+
+        :param on_cluster_root:
+        :param on_cluster:
+        :param on_shard:
+        :param on_replica:
+        :return:
+        """
         try:
             # ElementTree object
             config_tree = etree.fromstring(self.config, etree.XMLParser(remove_blank_text=True, encoding="utf-8"))
@@ -391,15 +480,11 @@ class CHConfigManager:
         self.config = etree.tostring(config_tree, pretty_print=True)
         return self.config
 
-    def demo(self):
-        self.walk_config(
-            on_cluster=self.on_cluster,
-            on_shard=self.on_shard,
-            on_replica=self.on_replica
-        )
-
 
 class CHManager:
+    """
+    High-level class for managing CH cluster configuration
+    """
     options = None
     config = None
     ch_config_manager = None
@@ -408,6 +493,11 @@ class CHManager:
         self.options = self.parse_options()
 
     def parse_options(self, config_folder='config'):
+        """
+        parse CLI options into Options object
+        :param config_folder:
+        :return:
+        """
         argparser = argparse.ArgumentParser(
             description='ClickHouse configuration manager',
             epilog='==============='
