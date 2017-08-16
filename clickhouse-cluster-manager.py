@@ -81,14 +81,14 @@ class SSHCopier:
         if self.dry:
             # just print what we'd like to do in here
             for file in self.files_to_copy:
-                print("DRY: copy {} to {}:{}/{} as {}:{}".format(
-                    file,
-                    self.hostname,
-                    self.port,
-                    self.dir_remote,
-                    self.username,
-                    '***'
-                ))
+                print("DRY: copy %(file)s to %(hostname)s:%(port)s/%(dir)s as %(username)s:%(password)s" % {
+                    'file': file,
+                    'hostname': self.hostname,
+                    'port': self.port,
+                    'dir': self.dir_remote,
+                    'username': self.username,
+                    'password': '***'
+                })
             # no actual actions are expected - nothing to do in here
             return
 
