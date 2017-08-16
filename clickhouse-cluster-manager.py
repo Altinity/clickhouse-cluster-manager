@@ -7,7 +7,8 @@ import os
 import paramiko
 
 import argparse
-
+import tempfile
+import re
 
 class SSHCopier:
     """Copy files via SSH
@@ -179,8 +180,12 @@ class CHConfigManager:
     # string - XML configuration content
     config = None
 
-    def __init__(self, config):
+    # options dict
+    options = None
+
+    def __init__(self, config, options):
         self.config = config
+        self.options = options
 
     @staticmethod
     def is_element_comment(element):
@@ -310,15 +315,18 @@ class CHConfigManager:
         :return:
         """
         def on_cluster(cluster_element, cluster_element_index):
+            """Callback on_cluster"""
             print()
             print(cluster_element.tag)
             pass
 
         def on_shard(cluster_element, cluster_element_index, shard_element, shard_element_index):
+            """Callback on_shard"""
             print('  ' + shard_element.tag + '[' + str(shard_element_index) + ']')
             pass
 
         def on_replica(cluster_element, cluster_element_index, shard_element, shard_element_index, replica_element, replica_element_index):
+            """Callback on_replica"""
             host_element = replica_element.find('host')
             port_element = replica_element.find('port')
             print("    " + replica_element.tag + '[' + str(replica_element_index) + "]|" + host_element.tag + ":" + host_element.text + ":" + port_element.tag + ":" + port_element.text + " path: " + cluster_element.tag + '/' + shard_element.tag + '[' + str(shard_element_index) + ']/' + replica_element.tag)
@@ -332,29 +340,52 @@ class CHConfigManager:
         :return:
         """
         def on_replica(cluster_element, cluster_element_index, shard_element, shard_element_index, replica_element, replica_element_index):
+            """
+            Callback on_replica
+            Accumulate all replica specifications
+            """
+            # extract host:port from child tags of <replica>
             host_element = replica_element.find('host')
             port_element = replica_element.find('port')
             print("    " + replica_element.tag + '[' + str(replica_element_index) + "]|" + host_element.tag + ":" + host_element.text + ":" + port_element.tag + ":" + port_element.text + " path: " + cluster_element.tag + '/' + shard_element.tag + '[' + str(shard_element_index) + ']/' + replica_element.tag)
             host = host_element.text
             port = port_element.text
+            # accumulate {host:HOST, port:9000} dict
             on_replica.hosts.append({'host': host, 'port':port})
 
-            pass
+        # accumulate all replica specifications
         on_replica.hosts = []
         self.walk_config(on_replica=on_replica)
 
+        # save config to temp file
+        fd, tempfile_path = tempfile.mkstemp()
+        os.write(fd, self.config)
+        os.close(fd)
+        print("Save config as %(tmpfile)s" % {'tmpfile': tempfile_path})
+
+        # walk over all replica specifications and SSH copy config onto it
         for replica in on_replica.hosts:
+            # where config would be copied to
             host = replica['host']
             print("Pushing to:" + host)
+
+            #
+            # SSH copy config file to replica
+            #
+
+            # copy temp file
             copier = SSHCopier(
                 hostname=host,
-                username='uname',
-                password='pwd',
-                dir_remote='/etc/some/where/there',
-                files_to_copy=['config.file.xml'],
-                dry=True
+                username=self.options['ssh-user'],
+                password=self.options['ssh-password'],
+                dir_remote='/etc/clickhouse-server/',
+                files_to_copy=[tempfile_path],
+                dry=self.options['dry']
             )
             copier.copy_files_list()
+
+        # remove temp file
+        os.remove(tempfile_path)
 
     # lxml.etree._Element
     # def on_cluster(self, cluster_element):
@@ -370,10 +401,10 @@ class CHConfigManager:
 
     def walk_config(
             self,
-            on_cluster_root = None,
-            on_cluster = None,
-            on_shard = None,
-            on_replica = None
+            on_cluster_root=None,
+            on_cluster=None,
+            on_shard=None,
+            on_replica=None
     ):
         """
         Walk over cluster configuration calling callback functions on-the-way
@@ -492,26 +523,74 @@ class CHManager:
     def __init__(self):
         self.options = self.parse_options()
 
-    def parse_options(self, config_folder='config'):
+    @staticmethod
+    def parse_options():
         """
-        parse CLI options into Options object
-        :param config_folder:
-        :return:
+        parse CLI options into options dict
+        :return: dict
         """
         argparser = argparse.ArgumentParser(
             description='ClickHouse configuration manager',
             epilog='==============='
         )
-        argparser.add_argument('--interactive', action='store_true', help='Interactive mode')
-        argparser.add_argument('--config-folder', type=str, default='/etc/clickhouse-server/config/', help='Path to CH server config folder. Default value=/etc/clickhouse-server/')
-        argparser.add_argument('--config.xml', type=str, default='config.xml', help='CH server config file. Default value=config.xml')
-        argparser.add_argument('--user.xml', type=str, default='user.xml', help='CH server user file. Default value=user.xml')
+        argparser.add_argument(
+            '--interactive',
+            action='store_true',
+            help='Interactive mode'
+        )
+        argparser.add_argument(
+            '--dry',
+            action='store_true',
+            help='Dry mode'
+        )
+        argparser.add_argument(
+            '--config-folder',
+            type=str,
+            default='/etc/clickhouse-server/',
+            help='Path to CH server config folder. Default value=/etc/clickhouse-server/'
+        )
+        argparser.add_argument(
+            '--ssh-user',
+            type=str,
+            default='root',
+            help='username to be used when pushing on servers'
+        )
+        argparser.add_argument(
+            '--ssh-password',
+            type=str,
+            default='',
+            help='password to be used when pushing on servers'
+        )
+        argparser.add_argument(
+            '--ssh-port',
+            type=str,
+            default='22',
+            help='port to be used when pushing on servers'
+        )
+        argparser.add_argument(
+            '--config.xml',
+            type=str,
+            default='config.xml',
+            help='CH server config file. Default value=config.xml'
+        )
+        argparser.add_argument(
+            '--user.xml',
+            type=str,
+            default='user.xml',
+            help='CH server user file. Default value=user.xml'
+        )
         args = argparser.parse_args()
+
+        # build options
         return {
             'interactive': args.interactive,
-            'config-folder': args.config_folder,
-            'config.xml': args.config_folder + '/' + getattr(args, 'config.xml'),
-            'user.xml': args.config_folder + '/' + getattr(args, 'user.xml')
+            'dry': args.dry,
+            'ssh-user': args.ssh_user,
+            'ssh-password': args.ssh_password,
+            'ssh-port': args.ssh_port,
+            'config-folder': os.path.abspath(args.config_folder),
+            'config.xml': os.path.abspath(args.config_folder + '/' + getattr(args, 'config.xml')),
+            'user.xml': os.path.abspath(args.config_folder + '/' + getattr(args, 'user.xml'))
         }
 
     def open_config(self):
@@ -525,8 +604,14 @@ class CHManager:
         f.close()
 
     @staticmethod
-    def parse_element(line):
+    def cluster_path_parse(line):
+        """
+        Parse cluster-address line specification
+        :param line:
+        :return: dict
+        """
         # /cluster/0/host:port
+        # /cluster/shard0/host:port
 
         line = line.strip()
 
@@ -544,7 +629,11 @@ class CHManager:
             cluster = None
 
         try:
-            shard_index = int(parts[2])
+            # would like to consume both ways
+            # .../0/...
+            # .../shard0/...
+            # so strip all non-numbers in the list
+            shard_index = int(re.sub('[^0-9]', '', parts[2]))
         except IndexError:
             shard_index = None
 
@@ -563,6 +652,11 @@ class CHManager:
             'host': host,
             'port': port
         }
+
+    @staticmethod
+    def cluster_path_print():
+        print('/cluster1/shard0/host:port')
+        pass
 
     @staticmethod
     def get_interactive_choice():
@@ -591,37 +685,39 @@ class CHManager:
 
             if choice == '1':
                 print("Add cluster")
-                c = self.parse_element(input("Cluster name to add:"))
+                c = self.cluster_path_parse(input("Cluster name to add:"))
                 print(c)
                 self.config = self.ch_config_manager.add_cluster(c['cluster'])
 
             elif choice == '2':
                 print("Add shard")
-                c = self.parse_element(input("Cluster name to add shard:"))
+                c = self.cluster_path_parse(input("Cluster name to add shard:"))
                 print(c)
                 self.config = self.ch_config_manager.add_shard(c['cluster'])
 
             elif choice == '3':
                 print("Add replica")
-                c = self.parse_element(input("Cluster path for replica:"))
+                self.cluster_path_print()
+                c = self.cluster_path_parse(input("Cluster path for replica:"))
                 print(c)
                 self.config = self.ch_config_manager.add_replica(c['cluster'], c['shard_index'], c['host'], c['port'])
 
             elif choice == 'a':
                 print("Delete cluster")
-                c = self.parse_element(input("Cluster name to delete:"))
+                c = self.cluster_path_parse(input("Cluster name to delete:"))
                 print(c)
                 self.config = self.ch_config_manager.delete_cluster(c['cluster'])
 
             elif choice == 's':
                 print("Delete shard")
-                c = self.parse_element(input("Cluster path for shard:"))
+                c = self.cluster_path_parse(input("Cluster path for shard:"))
                 print(c)
                 self.config = self.ch_config_manager.delete_shard(c['cluster'], c['shard_index'])
 
             elif choice == 'd':
                 print("Delete replica")
-                c = self.parse_element(input("Cluster path for replica:"))
+                self.cluster_path_print()
+                c = self.cluster_path_parse(input("Cluster path for replica:"))
                 print(c)
                 self.config = self.ch_config_manager.delete_replica(c['cluster'], c['shard_index'], c['host'], c['port'])
 
@@ -645,7 +741,7 @@ class CHManager:
 
     def main(self):
         self.open_config()
-        self.ch_config_manager = CHConfigManager(self.config)
+        self.ch_config_manager = CHConfigManager(self.config, self.options)
         if self.options['interactive']:
             self.interactive()
         else:
