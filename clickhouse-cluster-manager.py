@@ -541,13 +541,15 @@ class CHManager:
         argparser.add_argument(
             '--dry',
             action='store_true',
-            help='Dry mode'
+            help='Dry mode - do not do anyting that can harm. '
+            'Config files will not be pushed/written/etc. Just simulate. '
+            'Useful for debugging. '
         )
         argparser.add_argument(
-            '--config-folder',
+            '--config-file',
             type=str,
-            default='/etc/clickhouse-server/',
-            help='Path to CH server config folder. Default value=/etc/clickhouse-server/'
+            default='',
+            help='Path to CH server config file to work with. Default - not specified'
         )
         argparser.add_argument(
             '--ssh-user',
@@ -568,6 +570,12 @@ class CHManager:
             help='port to be used when pushing on servers'
         )
         argparser.add_argument(
+            '--config-folder',
+            type=str,
+            default='/etc/clickhouse-server/',
+            help='Path to CH server config folder. Default value=/etc/clickhouse-server/'
+        )
+        argparser.add_argument(
             '--config.xml',
             type=str,
             default='config.xml',
@@ -584,6 +592,7 @@ class CHManager:
         # build options
         return {
             'interactive': args.interactive,
+            'config-file': args.config_file,
             'dry': args.dry,
             'ssh-user': args.ssh_user,
             'ssh-password': args.ssh_password,
@@ -594,9 +603,13 @@ class CHManager:
         }
 
     def open_config(self):
-        f = open(self.options['config.xml'], 'rb')
-        self.config = f.read()
-        f.close()
+        try:
+            f = open(self.options['config.xml'], 'rb')
+            self.config = f.read()
+            f.close()
+            return True
+        except:
+            return False
 
     def write_config(self):
         f = open('test.xml', 'wb')
@@ -658,6 +671,65 @@ class CHManager:
         print('/cluster1/shard0/host:port')
         pass
 
+    def add_cluster(self):
+        """High-level add cluster"""
+        print("Add cluster")
+        c = self.cluster_path_parse(input("Cluster name to add:"))
+        print(c)
+        self.config = self.ch_config_manager.add_cluster(c['cluster'])
+
+    def add_shard(self):
+        """High-level add shard"""
+        print("Add shard")
+        c = self.cluster_path_parse(input("Cluster name to add shard:"))
+        print(c)
+        self.config = self.ch_config_manager.add_shard(c['cluster'])
+
+    def add_replica(self):
+        """High-level add replica"""
+        print("Add replica")
+        self.cluster_path_print()
+        c = self.cluster_path_parse(input("Cluster path for replica:"))
+        print(c)
+        self.config = self.ch_config_manager.add_replica(c['cluster'], c['shard_index'], c['host'], c['port'])
+
+    def delete_cluster(self):
+        """High-level delete cluster"""
+        print("Delete cluster")
+        c = self.cluster_path_parse(input("Cluster name to delete:"))
+        print(c)
+        self.config = self.ch_config_manager.delete_cluster(c['cluster'])
+
+    def delete_shard(self):
+        """High-level delete shard"""
+        print("Delete shard")
+        c = self.cluster_path_parse(input("Cluster path for shard:"))
+        print(c)
+        self.config = self.ch_config_manager.delete_shard(c['cluster'], c['shard_index'])
+
+    def delete_replica(self):
+        """High-level delete replica"""
+        print("Delete replica")
+        self.cluster_path_print()
+        c = self.cluster_path_parse(input("Cluster path for replica:"))
+        print(c)
+        self.config = self.ch_config_manager.delete_replica(c['cluster'], c['shard_index'], c['host'], c['port'])
+
+    def print(self):
+        """High-level print config"""
+        print("Print cluster layout")
+        self.ch_config_manager.print()
+
+    def write(self):
+        """High-level write config"""
+        print("Write cluster layout to disk")
+        self.write_config()
+
+    def push(self):
+        """High-level push config"""
+        self.ch_config_manager.push()
+        print("pUsh config everywhere")
+
     @staticmethod
     def get_interactive_choice():
         print()
@@ -680,67 +752,36 @@ class CHManager:
     def interactive(self):
         choice = ''
         while choice != 'q':
-
             choice = self.get_interactive_choice()
 
             if choice == '1':
-                print("Add cluster")
-                c = self.cluster_path_parse(input("Cluster name to add:"))
-                print(c)
-                self.config = self.ch_config_manager.add_cluster(c['cluster'])
-
+                self.add_cluster()
             elif choice == '2':
-                print("Add shard")
-                c = self.cluster_path_parse(input("Cluster name to add shard:"))
-                print(c)
-                self.config = self.ch_config_manager.add_shard(c['cluster'])
-
+                self.add_shard()
             elif choice == '3':
-                print("Add replica")
-                self.cluster_path_print()
-                c = self.cluster_path_parse(input("Cluster path for replica:"))
-                print(c)
-                self.config = self.ch_config_manager.add_replica(c['cluster'], c['shard_index'], c['host'], c['port'])
-
+                self.add_replica()
             elif choice == 'a':
-                print("Delete cluster")
-                c = self.cluster_path_parse(input("Cluster name to delete:"))
-                print(c)
-                self.config = self.ch_config_manager.delete_cluster(c['cluster'])
-
+                self.delete_cluster()
             elif choice == 's':
-                print("Delete shard")
-                c = self.cluster_path_parse(input("Cluster path for shard:"))
-                print(c)
-                self.config = self.ch_config_manager.delete_shard(c['cluster'], c['shard_index'])
-
+                self.delete_shard()
             elif choice == 'd':
-                print("Delete replica")
-                self.cluster_path_print()
-                c = self.cluster_path_parse(input("Cluster path for replica:"))
-                print(c)
-                self.config = self.ch_config_manager.delete_replica(c['cluster'], c['shard_index'], c['host'], c['port'])
-
+                self.delete_replica()
             elif choice == 'p':
-                print("Print cluster layout")
-                self.ch_config_manager.print()
-
+                self.print()
             elif choice == 'w':
-                print("Write cluster layout to disk")
-                self.write_config()
-
+                self.write()
             elif choice == 'u':
-                self.ch_config_manager.push()
-                print("pUsh config everywhere")
-
+                self.push()
             elif choice == 'q':
                 print("Thanks for playing. Bye.")
-
             else:
                 print("I didn't understand that choice.")
 
     def main(self):
-        self.open_config()
+        if not self.open_config():
+            print("Can't open config file %s" % (self.options['config.xml']))
+            return
+
         self.ch_config_manager = CHConfigManager(self.config, self.options)
         if self.options['interactive']:
             self.interactive()
@@ -752,15 +793,6 @@ if __name__ == '__main__':
     # print("RUN")
     manager = CHManager();
     manager.main()
-
-        #    copier = SSHCopier(
-#        hostname='192.168.74.157',
-#        password='wax2bee692',
-#        dir_remote='/home/user/',
-#        files_to_copy=['/home/user/copytest.txt']
-#    )
-#    copier.copy_files_list()
-
 
 
 
