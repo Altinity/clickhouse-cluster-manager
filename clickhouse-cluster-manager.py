@@ -10,6 +10,7 @@ import argparse
 import tempfile
 import re
 
+
 class SSHCopier:
     """Copy files via SSH
 
@@ -35,7 +36,7 @@ class SSHCopier:
     # remote SSH password
     password = None
 
-    # local path to private RSA key, typically ~/.ss/my_rsa_to_hostname
+    # local path to private RSA key, typically ~/.ssh/rsa_key_for_remote_host
     rsa_private_key_filename = None
 
     # dir on remote SSH server where files would be copied
@@ -80,6 +81,7 @@ class SSHCopier:
 
         if self.dry:
             # just print what we'd like to do in here
+            # do actions would be taken
             for file in self.files_to_copy:
                 print("DRY: copy %(file)s to %(hostname)s:%(port)s/%(dir)s as %(username)s:%(password)s" % {
                     'file': file,
@@ -89,21 +91,21 @@ class SSHCopier:
                     'username': self.username,
                     'password': '***'
                 })
-            # no actual actions are expected - nothing to do in here
+            # no actual actions would be taken - nothing to do in this method any more
             return
 
         # build dictionary of known hosts
         try:
             host_keys = paramiko.util.load_host_keys(os.path.expanduser('~/.ssh/known_hosts'))
         except:
-            # can't open known_hosts
+            # can't open known_hosts file, assume it's empty
             host_keys = {}
 
         if self.hostname in host_keys:
             # already known host
             hostkeytype = host_keys[self.hostname].keys()[0]
             hostkey = host_keys[self.hostname][hostkeytype]
-            print('Using host key of type' + hostkeytype)
+            print('Using host key of type ' + hostkeytype)
 
         # connect
         try:
@@ -116,33 +118,33 @@ class SSHCopier:
 
         # key auth
         # try to authenticate with any of:
-        # 1. private keys available from an SSH agent
-        # 2. local private RSA key file (assumes no pass phrase).
+        # 1. private keys available from SSH agent
+        # 2. local private RSA key file (assumes no pass phrase required)
 
         # load available keys
         rsa_keys = paramiko.Agent().get_keys()
 
-        # append key from key file to other available keys
+        # append key from provided key file to other available keys
         try:
             key = paramiko.RSAKey.from_private_key_file(self.rsa_private_key_filename)
             rsa_keys += (key,)
         except:
-            print('Failed loading RSA private key ' + self.rsa_private_key_filename + ' desc ')
+            print('Failed loading RSA private key', self.rsa_private_key_filename)
 
         if len(rsa_keys) > 0:
-            # have RSA keys
+            # have RSA keys, try to auth with all of them
             for key in rsa_keys:
                 try:
                     transport.auth_publickey(self.username, key)
-                    # auth succeeded
+                    # auth succeeded with this key
                     # not need to continue with next key
                     break
                 except:
-                    # auth failed
+                    # auth failed with this key, continue with next key
                     pass
 
         if not transport.is_authenticated():
-            # key auth not performed or failed
+            # key auth not performed or failed - try username/password
             transport.auth_password(username=self.username, password=self.password)
         else:
             # key auth completed successfully
@@ -154,15 +156,17 @@ class SSHCopier:
         try:
             sftp.mkdir(self.dir_remote)
         except:
+            # may be remote dir already exists
             pass
 
         # copy files
         for filename in self.files_to_copy:
-            remote_file = self.dir_remote + '/' + os.path.basename(filename)
+            remote_filepath = self.dir_remote + '/' + os.path.basename(filename)
             try:
-                sftp.put(filename, remote_file)
+                sftp.put(filename, remote_filepath)
                 files_copied += 1
             except:
+                # file not copied, skip so far
                 pass
 
         sftp.close()
@@ -220,7 +224,9 @@ class CHConfigManager:
         """
         def on_cluster(cluster_element, cluster_element_index):
             if cluster_element.tag != cluster_name:
+                # this is not our cluster
                 return
+            # this is our cluster, add shard
             new_shard_element = etree.Element('shard')
             cluster_element.append(new_shard_element)
 
@@ -238,11 +244,14 @@ class CHConfigManager:
         """
         def on_shard(cluster_element, cluster_element_index, shard_element, shard_element_index):
             if cluster_element.tag != cluster_name:
+                # this is not our cluster
                 return
 
             if shard_element_index != shard_index:
+                # this is not our shard
                 return
 
+            # this is our cluster + shard, add replica
             new_replica_element = etree.Element('replica')
 
             new_host_element = etree.Element('host')
@@ -253,20 +262,23 @@ class CHConfigManager:
             new_replica_element.append(new_host_element)
             new_replica_element.append(new_port_element)
 
+            # append replica to the shard
             shard_element.append(new_replica_element)
 
         return self.walk_config(on_shard=on_shard)
 
     def delete_cluster(self, cluster_name):
         """
-        Delete cluster from cluster specification
+        Delete cluster from clusters specification
 
         :param cluster_name:
         :return:
         """
         def on_cluster(cluster_element, cluster_element_index):
             if cluster_element.tag != cluster_name:
+                # this is not our cluster
                 return
+            # this is our cluster, remove current cluster from it's parent
             cluster_element.getparent().remove(cluster_element)
 
         return self.walk_config(on_cluster=on_cluster)
@@ -280,11 +292,14 @@ class CHConfigManager:
         """
         def on_shard(cluster_element, cluster_element_index, shard_element, shard_element_index):
             if cluster_element.tag != cluster_name:
+                # this is not our cluster
                 return
 
             if shard_element_index != shard_index:
+                # this is not our shard
                 return
 
+            # this is our cluster and our shard
             cluster_element.remove(shard_element)
 
         return self.walk_config(on_shard=on_shard)
@@ -300,11 +315,14 @@ class CHConfigManager:
         """
         def on_replica(cluster_element, cluster_element_index, shard_element, shard_element_index, replica_element, replica_element_index):
             if cluster_element.tag != cluster_name:
+                # this is not our cluster
                 return
 
             if shard_element_index != shard_index:
+                # this is not our shard
                 return
 
+            # this is our cluster and our shard
             shard_element.remove(replica_element)
 
         return self.walk_config(on_replica=on_replica)
@@ -436,6 +454,8 @@ class CHConfigManager:
             # no <remote_servers> tag available
             return
 
+        # <remote_servers> found
+
         if callable(on_cluster_root):
             on_cluster_root(remote_servers_element)
 
@@ -459,6 +479,7 @@ class CHConfigManager:
             if callable(on_cluster):
                 on_cluster(cluster_element, cluster_element_index)
 
+            # shards have no names, so they need to be indexed in order to be accessed personally
             shard_element_index = 0
 
             # walk over shards inside cluster
@@ -475,6 +496,7 @@ class CHConfigManager:
                 if callable(on_shard):
                     on_shard(cluster_element, cluster_element_index, shard_element, shard_element_index)
 
+                # replicas have no names, so they need to be indexed in order to be accessed personally
                 replica_element_index = 0
 
                 # walk over replicas inside shard
@@ -508,6 +530,8 @@ class CHConfigManager:
         #
         #         shard_element.append(new_replica_element)
         #
+
+        # buld XML out of elements tree we have
         self.config = etree.tostring(config_tree, pretty_print=True)
         return self.config
 
@@ -628,6 +652,7 @@ class CHManager:
 
         line = line.strip()
 
+        # ensure starting '/'
         if not line.startswith('/'):
             line = '/' + line
 
@@ -636,11 +661,14 @@ class CHManager:
         except:
             parts = []
 
+        # parts[0] would be empty, ignore it
+        # fetch cluster - parts[1]
         try:
             cluster = parts[1]
         except IndexError:
             cluster = None
 
+        # fetch shard - parts[2]
         try:
             # would like to consume both ways
             # .../0/...
@@ -650,6 +678,7 @@ class CHManager:
         except IndexError:
             shard_index = None
 
+        # fetch host:port - parts[3]
         try:
             host_port = parts[3]
             host_port = host_port.split(':')
@@ -668,7 +697,7 @@ class CHManager:
 
     @staticmethod
     def cluster_path_print():
-        print('/cluster1/shard0/host:port')
+        print('Cluster path example /cluster1/shard0/host:port')
         pass
 
     def add_cluster(self):
@@ -778,6 +807,7 @@ class CHManager:
                 print("I didn't understand that choice.")
 
     def main(self):
+        """Main function. Global entry point."""
         if not self.open_config():
             print("Can't open config file %s" % (self.options['config.xml']))
             return
