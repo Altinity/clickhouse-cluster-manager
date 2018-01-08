@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<yandex>
+<remote_servers>
+    <cluster1>
+    </cluster1>
+    <cluster2>
+    </cluster2>
+</remote_servers>
+</yandex>
