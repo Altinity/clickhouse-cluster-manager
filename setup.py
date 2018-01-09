@@ -4,7 +4,7 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="clickhouse-,anager",
+    name="clickhouse-manager",
 
     # version should comply with PEP440
     version='0.0.201801041',
