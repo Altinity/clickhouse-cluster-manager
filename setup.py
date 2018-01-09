@@ -7,7 +7,7 @@ setup(
     name="clickhouse-manager",
 
     # version should comply with PEP440
-    version='0.0.201801041',
+    version='0.0.201801091',
 
     description='ClickHouse Manager',
     long_description='ClickHouse Manager',
@@ -58,6 +58,8 @@ setup(
     # these will be installed by pip
     # https://packaging.python.org/en/latest/requirements.html
     install_requires=[
+        'paramiko',
+        'lxml',
     ],
 
     # cross-platform support for pip to create the appropriate form of executable
